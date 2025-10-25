@@ -121,22 +121,55 @@ GROUP BY grouped_positions -- battery(56,195) / infield(52,186) / outfield (28,4
 -- 5. Find the average number of strikeouts per game by decade since 1920. Round the numbers you report to
 -- 2 decimal places. Do the same for home runs per game. Do you see any trends?
 
-SELECT
-	(yearid / 10) * 10 AS decade,
-	SUM(so) AS total_so,
-	SUM(hr) AS total_hr,
-	SUM(g) AS total_games,
-	ROUND(SUM(so) * 1 / NULLIF(SUM(g), 0), 2) AS strikeouts_per_game,
-	ROUND(sum(hr) * 1 / NULLIF(SUM(g), 0), 2) AS homeruns_per_game
-FROM pitchingpost
-WHERE yearid >= 1920
-GROUP BY (yearid/10) * 10
-ORDER BY decade -- something is wrong or off here
+-- SELECT
+-- 	((yearid / 10) * 10)::text || 's' AS decade,
+-- 	SUM(so) AS total_so,
+-- 	SUM(hr) AS total_hr,
+-- 	SUM(g) AS total_games,
+-- 	ROUND(SUM(so) * 1 / NULLIF(SUM(g), 0), 2) AS strikeouts_per_game,
+-- 	ROUND(sum(hr) * 1 / NULLIF(SUM(g), 0), 2) AS homeruns_per_game
+-- FROM pitchingpost
+-- WHERE yearid >= 1920
+-- GROUP BY (yearid/10) * 10
+-- ORDER BY decade -- something is wrong or off here
+
+-----------Sub Query version------------
+SELECT 
+	decade,
+	ROUND(total_so * 1.0 / total_games, 2) AS avg_so_per_game,
+	ROUND(total_hr * 1.0 / total_games, 2) AS avg_hr_per_game
+FROM (
+	SELECT
+		((yearid / 10) * 10)::text || 's' AS decade,
+		SUM(so) AS total_so,
+		SUM(hr) AS total_hr,
+		SUM(gs) AS total_games --using gs instead of g gives us the total games started, where g returns the games 
+		--each pitcher played, which multiplies the games count and throws off the math
+		COUNT
+	FROM pitching
+	WHERE yearid >= 1920
+	GROUP BY (yearid / 10) * 10
+	) AS decade_stats
+ORDER BY decade; -- As the pitching got better, so did the power hitting, higher strikeouts led to a slow rise
+	-- in hr numbers, in the 1970's we likely see a dip due to the current ball taking over the league in 1977
 
 -- 6. Find the player who had the most success stealing bases in 2016, where __success__ is measured
 -- as the percentage of stolen base attempts which are successful. (A stolen base attempt results either
 -- in a stolen base or being caught stealing.) Consider only players who attempted _at least_ 20 stolen bases.
-	
+
+SELECT
+p.namefirst,
+p.namelast,
+--(b.sb + b.cs) AS sb_attempts,
+b.sb,
+ROUND((b.sb * 100.0) / (b.sb + b.cs), 2) AS sb_pct
+FROM batting AS b
+LEFT JOIN people AS p
+	ON p.playerid = b.playerid
+WHERE b.yearid = '2016'
+	AND b.sb >= 20
+ORDER BY sb_pct DESC; -- CHRIS Owings (91.3%)
+
 
 -- 7.  From 1970 – 2016, what is the largest number of wins for a team that did not win the world series?
 -- What is the smallest number of wins for a team that did win the world series? Doing this will probably
@@ -144,12 +177,83 @@ ORDER BY decade -- something is wrong or off here
 -- Then redo your query, excluding the problem year. How often from 1970 – 2016 was it the case that a team
 -- with the most wins also won the world series? What percentage of the time?
 
+-- From 1970 – 2016, what is the largest number of wins for a team that did not win the world series?
+SELECT
+	name, 
+	yearid,
+	w,
+	wswin
+FROM teams
+WHERE yearid BETWEEN 1970 AND 2016
+AND wswin = 'Y'
+ORDER BY w DESC
+LIMIT 5; -- NY Yankees in 1998 with 114 regular season wins
+
+-- What is the smallest number of wins for a team that did win the world series? Doing this will probably
+-- result in an unusually small number of wins for a world series champion – determine why this is the case.
+-- Then redo your query, excluding the problem year.
+----------------------------------------------------------
+SELECT 
+	name, 
+	yearid, 
+	W,
+	wswin
+FROM teams
+WHERE yearid BETWEEN 1970 AND 2016
+  AND wswin = 'Y'
+ORDER BY W ASC
+LIMIT 5; -- 63 games by the LA Dodgers in 1981 due to a mid season strike canceling almost 1/3 of the games)
+----------------------------------------------------------
+SELECT 
+	name,
+	yearid,
+	W, 
+	wswin
+FROM teams
+WHERE yearid BETWEEN 1970 AND 2016
+  AND wswin = 'Y'
+  AND yearid != 1981
+ORDER BY W ASC
+LIMIT 5; -- STL Cardinals in 2006 with 83 regular season wins
+-----------------------------------------------------------
+-- How often from 1970 – 2016 was it the case that a team with the most wins also won the world series?
+-- What percentage of the time?
+WITH most_wins AS (
+	SELECT
+		yearid,
+		MAX(w) AS w
+	FROM teams
+	WHERE yearid >= 1970
+	GROUP BY yearid
+	ORDER BY yearid
+	),
+most_win_teams AS (
+	SELECT 
+		yearid,
+		name,
+		wswin
+	FROM teams
+	INNER JOIN most_wins
+	USING(yearid, w)
+)
+SELECT 
+	(SELECT COUNT(*)
+	 FROM most_win_teams
+	 WHERE wswin = 'N'
+	) * 100.0 /
+	(SELECT COUNT(*)
+	 FROM most_win_teams
+	); --75.471% of the time
 
 -- 8. Using the attendance figures from the homegames table, find the teams and parks which had the top 5
 -- average attendance per game in 2016 (where average attendance is defined as total attendance divided by
 -- number of games). Only consider parks where there were at least 10 games played. Report the park name,
 -- team name, and average attendance. Repeat for the lowest 5 average attendance.
 
+SELECT
+	park,
+
+FROM homegames
 
 -- 9. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the
 -- American League (AL)? Give their full name and the teams that they were managing when they won the award.
