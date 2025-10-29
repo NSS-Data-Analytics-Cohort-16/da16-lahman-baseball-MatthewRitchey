@@ -262,7 +262,7 @@ SELECT
 -- ORDER BY avg_attendance ASC
 -- LIMIT 5; -- close but unable to stack so far
 
-----------homegames table version----------
+---------------homegames---------------
 WITH ranked_attendance AS (
   SELECT
     p.park_name,
@@ -359,32 +359,67 @@ ORDER BY hr_2016 DESC;
 -- answer this question. As you do this analysis, keep in mind that salaries across the whole league tend
 -- to increase together, so you may want to look on a year-by-year basis.
 
-SELECT --most money spent per win
-  t.yearid,
-  t.name,
-  SUM(s.salary) AS total_salary,
-  MAX(t.W) AS wins,
-  ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
-FROM salaries AS s
-JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
-WHERE t.yearid >= 2000
-GROUP BY t.yearid, t.name
-ORDER BY salary_per_win DESC
-LIMIT 10;
+-- SELECT --most money spent per win
+--   t.yearid,
+--   t.name,
+--   SUM(s.salary) AS total_salary,
+--   MAX(t.W) AS wins,
+--   ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
+-- FROM salaries AS s
+-- JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
+-- WHERE t.yearid >= 2000
+-- GROUP BY t.yearid, t.name
+-- ORDER BY salary_per_win DESC
+-- LIMIT 10;
 
 
-SELECT --least money spent per win
-  t.yearid,
-  t.name,
-  SUM(s.salary) AS total_salary,
-  MAX(t.W) AS wins,
-  ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
-FROM salaries AS s
-JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
-WHERE t.yearid >= 2000
-GROUP BY t.yearid, t.name
-ORDER BY salary_per_win ASC
-LIMIT 10;
+-- SELECT --least money spent per win
+--   t.yearid,
+--   t.name,
+--   SUM(s.salary) AS total_salary,
+--   MAX(t.W) AS wins,
+--   ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
+-- FROM salaries AS s
+-- JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
+-- WHERE t.yearid >= 2000
+-- GROUP BY t.yearid, t.name
+-- ORDER BY salary_per_win ASC
+-- LIMIT 10;
+
+-- start with making the columns
+WITH salary_efficiency AS (
+  SELECT 
+    t.yearid,
+    t.name,
+    SUM(s.salary) AS total_salary,
+    MAX(t.W) AS wins,
+    ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
+  FROM salaries AS s
+  JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
+  WHERE t.yearid >= 2000
+  GROUP BY t.yearid, t.name
+),
+--sort by efficient or non-efficient
+most_efficient AS (
+  SELECT *, 'Efficient' AS efficiency_label
+  FROM salary_efficiency
+  ORDER BY salary_per_win ASC
+  LIMIT 10
+),
+least_efficient AS (
+  SELECT *, 'Non-Efficient' AS efficiency_label
+  FROM salary_efficiency
+  ORDER BY salary_per_win DESC
+  LIMIT 10
+)
+--final select query
+SELECT * FROM (
+  SELECT * FROM most_efficient
+  UNION ALL
+  SELECT * FROM least_efficient
+) AS combined
+ORDER BY wins DESC;
+
 
 -- 12. In this question, you will explore the connection between number of wins and attendance.
 --   *  Does there appear to be any correlation between attendance at home games and number of wins? </li>
