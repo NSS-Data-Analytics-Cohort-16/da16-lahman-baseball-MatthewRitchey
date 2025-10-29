@@ -250,18 +250,108 @@ SELECT
 -- number of games). Only consider parks where there were at least 10 games played. Report the park name,
 -- team name, and average attendance. Repeat for the lowest 5 average attendance.
 
-SELECT
-	park,
+-- SELECT
+-- 	park,
+-- 	team,
+-- 	 ROUND(SUM(attendance) * 1.0 / COUNT(*), 0) AS avg_attendance
+-- FROM homegames
+-- WHERE year = 2016
+-- 	AND attendance IS NOT NULL
+-- 	AND games >= 10
+-- GROUP BY park, team
+-- ORDER BY avg_attendance ASC
+-- LIMIT 5; -- close but unable to stack so far
 
-FROM homegames
+----------homegames table version----------
+WITH ranked_attendance AS (
+  SELECT
+    p.park_name,
+    h.team,
+	SUM(h.attendance) / SUM(h.games) AS attendance_per_game,
+    ROUND(SUM(h.attendance) * 1.0 / COUNT(*), 0) AS attendance,
+    ROW_NUMBER() OVER (ORDER BY SUM(h.attendance) * 1.0 / COUNT(*) DESC) AS rank_desc,
+    ROW_NUMBER() OVER (ORDER BY SUM(h.attendance) * 1.0 / COUNT(*) ASC) AS rank_asc
+  FROM homegames AS h
+  INNER JOIN parks AS p
+  	ON p.park = h.park
+  WHERE year = 2016
+    AND h.attendance IS NOT NULL
+    AND h.games >= 10
+  GROUP BY p.park_name, h.team
+)
+SELECT 
+	park_name, 
+	team,
+	attendance_per_game,
+	attendance
+FROM ranked_attendance
+WHERE rank_desc <= 5 OR rank_asc <= 5
+ORDER BY attendance DESC;
 
 -- 9. Which managers have won the TSN Manager of the Year award in both the National League (NL) and the
 -- American League (AL)? Give their full name and the teams that they were managing when they won the award.
+
+-- show the names, teams, and leagues
+WITH tsn_awards AS (
+  SELECT
+    m.playerid,
+    m.teamid,
+    m.lgid,
+    p.namefirst,
+    p.namelast
+  FROM managers AS m
+  INNER JOIN awardsmanagers AS a ON a.playerid = m.playerid
+  INNER JOIN people AS p ON p.playerid = m.playerid
+  WHERE a.awardid = 'TSN Manager of the Year'
+)
+-- Find managers who won in both leagues
+SELECT 
+  playerid,
+  namefirst,
+  namelast,
+  STRING_AGG(DISTINCT teamid, ', ') AS teams,
+  STRING_AGG(DISTINCT lgid, ', ') AS leagues
+FROM tsn_awards
+GROUP BY playerid, namefirst, namelast
+HAVING COUNT(DISTINCT lgid) = 2
+ORDER BY namelast, namefirst;
+
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. Consider only players who
 -- have played in the league for at least 10 years, and who hit at least one home run in 2016. Report the
 -- players' first and last names and the number of home runs they hit in 2016.
 
+WITH career_hr AS ( --finding the career home runs per player
+  SELECT
+    playerid,
+    MAX(hr) AS max_hr --finds their max hr total per row/year
+  FROM batting
+  GROUP BY playerid
+),
+season_count AS ( --for filtering for players with at least 10 years experience
+  SELECT
+    playerid,
+    COUNT(DISTINCT yearid) AS seasons_played
+  FROM batting
+  GROUP BY playerid
+),
+hr_2016 AS (--finding the 2016 results
+  SELECT
+    b.playerid,
+    b.hr,
+    p.namefirst || ' ' || p.namelast AS fullname
+  FROM batting AS b
+  JOIN people AS p ON p.playerid = b.playerid
+  WHERE b.yearid = 2016
+    AND b.hr >= 1
+)
+SELECT --final query
+  h.fullname,
+  h.hr AS hr_2016
+FROM hr_2016 AS h
+JOIN career_hr AS c ON h.playerid = c.playerid AND h.hr = c.max_hr --takes the rows where the max hr was from 2016
+JOIN season_count AS s ON h.playerid = s.playerid AND s.seasons_played >= 10 --filters for 10 years of experience
+ORDER BY hr_2016 DESC;
 
 -- **Open-ended questions**
 
@@ -269,10 +359,75 @@ FROM homegames
 -- answer this question. As you do this analysis, keep in mind that salaries across the whole league tend
 -- to increase together, so you may want to look on a year-by-year basis.
 
+SELECT --most money spent per win
+  t.yearid,
+  t.name,
+  SUM(s.salary) AS total_salary,
+  MAX(t.W) AS wins,
+  ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
+FROM salaries AS s
+JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
+WHERE t.yearid >= 2000
+GROUP BY t.yearid, t.name
+ORDER BY salary_per_win DESC
+LIMIT 10;
+
+
+SELECT --least money spent per win
+  t.yearid,
+  t.name,
+  SUM(s.salary) AS total_salary,
+  MAX(t.W) AS wins,
+  ROUND((SUM(s.salary) * 1.0 / NULLIF(MAX(t.W), 0))::numeric, 0) AS salary_per_win
+FROM salaries AS s
+JOIN teams AS t ON s.teamid = t.teamid AND s.yearid = t.yearid
+WHERE t.yearid >= 2000
+GROUP BY t.yearid, t.name
+ORDER BY salary_per_win ASC
+LIMIT 10;
+
 -- 12. In this question, you will explore the connection between number of wins and attendance.
 --   *  Does there appear to be any correlation between attendance at home games and number of wins? </li>
 --   *  Do teams that win the world series see a boost in attendance the following year? What about teams
 -- that made the playoffs? Making the playoffs means either being a division winner or a wild card winner.
+
+WITH team_stats AS (
+  SELECT
+    yearid,
+    teamid,
+    SUM(attendance) AS total_attendance,
+    MAX(W) AS wins,
+    MAX(divwin) = 'Y' OR MAX(wcwin) = 'Y' AS made_playoffs,
+    MAX(wswin) = 'Y' AS won_ws
+  FROM teams
+  WHERE yearid >= 2000
+  GROUP BY yearid, teamid
+),
+attendance_change AS (
+  SELECT
+    curr.teamid,
+    curr.yearid,
+    curr.total_attendance AS curr_attendance,
+    prev.total_attendance AS prev_attendance,
+    ROUND((curr.total_attendance - prev.total_attendance) * 100.0 / NULLIF(prev.total_attendance, 0), 2) AS pct_change,
+    prev.made_playoffs AS made_playoffs_prev_year,
+    prev.won_ws AS won_ws_prev_year,
+    curr.wins
+  FROM team_stats curr
+  JOIN team_stats prev ON curr.teamid = prev.teamid AND curr.yearid = prev.yearid + 1
+)
+SELECT 
+  yearid,
+  teamid,
+  wins,
+  curr_attendance,
+  prev_attendance,
+  pct_change,
+  made_playoffs_prev_year,
+  won_ws_prev_year
+FROM attendance_change
+ORDER BY pct_change DESC;
+
 
 -- 13. It is thought that since left-handed pitchers are more rare, causing batters to face them less often,
 -- that they are more effective. Investigate this claim and present evidence to either support or dispute
@@ -280,4 +435,80 @@ FROM homegames
 -- Are left-handed pitchers more likely to win the Cy Young Award? Are they more likely to make it into the
 -- hall of fame?
 
-  
+--pull all pitchers from the MLB level
+WITH pitcher_pool AS (
+  SELECT playerid, throws
+  FROM people
+  WHERE playerid IN (SELECT DISTINCT playerid FROM pitching)
+),
+--pulls the Cy Young winners
+cy_young_winners AS (
+  SELECT playerid
+  FROM awardsplayers
+  WHERE awardid = 'Cy Young Award'
+),
+--pulls pitchers inducted into the HOF
+hof_pitchers AS (
+  SELECT playerid
+  FROM halloffame
+  WHERE inducted = 'Y' AND category IN ('Pitcher', 'Player')
+),
+--Counts the pitchers and sorts them by left and right handed
+handedness_counts AS (
+  SELECT 
+    throws,
+    COUNT(DISTINCT playerid) AS total_pitchers
+  FROM pitcher_pool
+  WHERE throws IN ('L', 'R')
+  GROUP BY throws
+),
+--here is where we count the Cy Young winners by their handedness
+cy_young_counts AS (
+  SELECT 
+    p.throws,
+    COUNT(DISTINCT a.playerid) AS cy_young_winners
+  FROM cy_young_winners a
+  JOIN people p ON a.playerid = p.playerid
+  WHERE p.throws IN ('L', 'R')
+  GROUP BY p.throws
+),
+--joins the HOF counts to their handedness
+hof_counts AS (
+  SELECT 
+    p.throws,
+    COUNT(DISTINCT h.playerid) AS hof_inductees
+  FROM hof_pitchers h
+  JOIN people p ON h.playerid = p.playerid
+  WHERE p.throws IN ('L', 'R')
+  GROUP BY p.throws
+),
+
+combined AS (
+  SELECT 
+    hc.throws,
+    hc.total_pitchers,
+    COALESCE(cyc.cy_young_winners, 0) AS cy_young_winners,
+    COALESCE(hof.hof_inductees, 0) AS hof_inductees
+  FROM handedness_counts hc
+  LEFT JOIN cy_young_counts cyc ON hc.throws = cyc.throws
+  LEFT JOIN hof_counts hof ON hc.throws = hof.throws
+),
+--Combines all three metrics by handedness.
+totals AS (
+  SELECT 
+    SUM(total_pitchers) AS total_pitchers_all,
+    SUM(cy_young_winners) AS total_cy_young_all,
+    SUM(hof_inductees) AS total_hof_all
+  FROM combined
+)
+--Overall totals
+SELECT 
+  CASE WHEN c.throws = 'L' THEN 'Left-Handed' ELSE 'Right-Handed' END AS throwing_hand,
+  c.total_pitchers,
+  ROUND(c.total_pitchers * 100.0 / NULLIF(t.total_pitchers_all, 0), 2) AS pct_of_pitchers,
+  c.cy_young_winners,
+  ROUND(c.cy_young_winners * 100.0 / NULLIF(t.total_cy_young_all, 0), 2) AS pct_of_cy_young,
+  c.hof_inductees,
+  ROUND(c.hof_inductees * 100.0 / NULLIF(t.total_hof_all, 0), 2) AS pct_of_hof
+FROM combined c, totals t
+ORDER BY throwing_hand;
