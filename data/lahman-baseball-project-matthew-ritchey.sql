@@ -116,7 +116,9 @@ SELECT COUNT(po) AS putouts,
 	ELSE 'other'
 	END AS grouped_positions
 FROM fielding
-GROUP BY grouped_positions -- battery(56,195) / infield(52,186) / outfield (28,434)
+WHERE yearid = 2016
+GROUP BY grouped_positions
+ORDER BY grouped_positions ASC-- battery(938) / infield(661) / outfield (354)
    
 -- 5. Find the average number of strikeouts per game by decade since 1920. Round the numbers you report to
 -- 2 decimal places. Do the same for home runs per game. Do you see any trends?
@@ -314,7 +316,7 @@ SELECT
 FROM tsn_awards
 GROUP BY playerid, namefirst, namelast
 HAVING COUNT(DISTINCT lgid) = 2
-ORDER BY namelast, namefirst;
+ORDER BY namelast, namefirst;--39 rows
 
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. Consider only players who
@@ -351,7 +353,7 @@ SELECT --final query
 FROM hr_2016 AS h
 JOIN career_hr AS c ON h.playerid = c.playerid AND h.hr = c.max_hr --takes the rows where the max hr was from 2016
 JOIN season_count AS s ON h.playerid = s.playerid AND s.seasons_played >= 10 --filters for 10 years of experience
-ORDER BY hr_2016 DESC;
+ORDER BY hr_2016 DESC; --Edwin Encarnacion (42) has the most, 9 total players on list
 
 -- **Open-ended questions**
 
@@ -418,7 +420,7 @@ SELECT * FROM (
   UNION ALL
   SELECT * FROM least_efficient
 ) AS combined
-ORDER BY wins DESC;
+ORDER BY wins DESC; --money does not completely buy wins
 
 
 -- 12. In this question, you will explore the connection between number of wins and attendance.
@@ -426,42 +428,58 @@ ORDER BY wins DESC;
 --   *  Do teams that win the world series see a boost in attendance the following year? What about teams
 -- that made the playoffs? Making the playoffs means either being a division winner or a wild card winner.
 
+--CTE for creating the team stats table
 WITH team_stats AS (
   SELECT
     yearid,
-    teamid,
+    name,
     SUM(attendance) AS total_attendance,
     MAX(W) AS wins,
     MAX(divwin) = 'Y' OR MAX(wcwin) = 'Y' AS made_playoffs,
     MAX(wswin) = 'Y' AS won_ws
   FROM teams
   WHERE yearid >= 2000
-  GROUP BY yearid, teamid
+  GROUP BY yearid, name
 ),
+--CTE for creating attendance tables for answers
 attendance_change AS (
   SELECT
-    curr.teamid,
+    curr.name,
     curr.yearid,
     curr.total_attendance AS curr_attendance,
     prev.total_attendance AS prev_attendance,
     ROUND((curr.total_attendance - prev.total_attendance) * 100.0 / NULLIF(prev.total_attendance, 0), 2) AS pct_change,
+    curr.wins,
+    prev.wins AS prev_wins,
+    curr.wins - prev.wins AS win_change,
     prev.made_playoffs AS made_playoffs_prev_year,
     prev.won_ws AS won_ws_prev_year,
-    curr.wins
+    CASE WHEN prev.made_playoffs THEN 'Playoff Boost' ELSE 'No Playoffs' END AS playoff_boost,
+    CASE WHEN prev.won_ws THEN 'WS Boost' ELSE 'No WS' END AS ws_boost
   FROM team_stats curr
-  JOIN team_stats prev ON curr.teamid = prev.teamid AND curr.yearid = prev.yearid + 1
+  JOIN team_stats prev ON curr.name = prev.name AND curr.yearid = prev.yearid + 1
 )
+--final query
 SELECT 
   yearid,
-  teamid,
+  name,
   wins,
+  prev_wins,
+  win_change,
   curr_attendance,
   prev_attendance,
   pct_change,
-  made_playoffs_prev_year,
-  won_ws_prev_year
+  playoff_boost,
+  ws_boost
 FROM attendance_change
-ORDER BY pct_change DESC;
+ORDER BY pct_change DESC
+LIMIT 20;--2001 was when the Brewers moved into Miller Park, explaining the boosted popularity
+-- the 2001 Twins had a much better performance dispite not making the playoffs the year prior
+-- the 2001 Pirates & 2003 Reds also moved into a new diamond dispite having less wins than the year before
+-- the 2003 Angels had a boost from winning their first ever World Series title in 2002, dispite having less 
+-- wins in 2003
+-- The 2004 Mirlins attracted more fans by winning their second WS title in 2003
+-- the 2006 White Sox was riding a high from winning the WS in 2005 dispite losing some extra games the next year
 
 
 -- 13. It is thought that since left-handed pitchers are more rare, causing batters to face them less often,
@@ -517,7 +535,7 @@ hof_counts AS (
   WHERE p.throws IN ('L', 'R')
   GROUP BY p.throws
 ),
-
+--combines CY winners and HOF inductees
 combined AS (
   SELECT 
     hc.throws,
